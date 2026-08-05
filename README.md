@@ -37,7 +37,7 @@ After cloning this repository on Unity, run:
 bash scripts/unity_submit.sh /project/pi_roohie_umass_edu/BGK_shock
 ```
 
-The script discovers the existing M2.5, M3, and M5 full-state files, validates their required arrays, writes a manifest, generates 18 GPU configs, submits the GPU array with at most four simultaneous jobs, and submits three matched-storage CPU baselines. It uses the existing Unity Python environment at:
+The script discovers the existing M2.5, M3, and M5 full-state files, validates their required arrays, writes a manifest, and submits a small preflight smoke job. Only after that job succeeds does Slurm release the 18-run GPU array and three matched-storage CPU baselines. At most four GPU jobs run simultaneously. The launcher uses the existing Unity Python environment at:
 
 ```text
 /work/pi_roohie_umass_edu/roohie_umass_edu/.conda/envs/dde-tf/bin/python

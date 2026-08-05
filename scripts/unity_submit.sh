@@ -37,7 +37,13 @@ if [[ "$TASK_COUNT" -lt 1 ]]; then
   exit 3
 fi
 
+SMOKE_JOB="$(sbatch --parsable \
+  --export="ALL,KGFR_REPO_ROOT=$REPO_ROOT,KGFR_PYTHON=$PYTHON_BIN" \
+  slurm/smoke.slurm)"
+echo "Submitted preflight smoke test: job $SMOKE_JOB"
+
 GPU_JOB="$(sbatch --parsable \
+  --dependency="afterok:$SMOKE_JOB" \
   --array="0-$((TASK_COUNT - 1))%4" \
   --export="ALL,KGFR_REPO_ROOT=$REPO_ROOT,KGFR_TASK_FILE=$TASK_FILE,KGFR_PYTHON=$PYTHON_BIN" \
   slurm/conditional_array.slurm)"
@@ -45,6 +51,7 @@ echo "Submitted conditional suite: job $GPU_JOB ($TASK_COUNT tasks)"
 
 if [[ "$BASELINE_COUNT" -gt 0 ]]; then
   BASELINE_JOB="$(sbatch --parsable \
+    --dependency="afterok:$SMOKE_JOB" \
     --array="0-$((BASELINE_COUNT - 1))%2" \
     --export="ALL,KGFR_REPO_ROOT=$REPO_ROOT,KGFR_BASELINE_TASK_FILE=$BASELINE_TASK_FILE,KGFR_PYTHON=$PYTHON_BIN" \
     slurm/baseline_array.slurm)"
@@ -52,4 +59,5 @@ if [[ "$BASELINE_COUNT" -gt 0 ]]; then
 fi
 
 echo "Monitor: squeue -u \"$USER\""
+echo "Preflight: tail -f \"$REPO_ROOT\"/logs/conditional/kinetic_smoke_${SMOKE_JOB}.out"
 echo "Logs:    tail -f \"$REPO_ROOT\"/logs/conditional/*.out"
