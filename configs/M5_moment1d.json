@@ -1,0 +1,21 @@
+{
+  "run_name": "M5_moment1d_N80",
+  "data_path": "data/pack_M3_M5/M5_DVM_hmom.npz",
+  "output_dir": "runs",
+  "device": "cuda",
+  "seed": 334,
+  "variables": ["rho", "ux", "T", "qx", "sigma_xx", "M300_neq", "Rxx_neq", "mxxx"],
+  "model": {
+    "num_kernels": 80,
+    "log_scale_min": -8.0,
+    "log_scale_max": 0.0,
+    "init_log_scale": -2.0
+  },
+  "train": {
+    "steps": 15000,
+    "batch_size": 512,
+    "lr": 1.0e-3,
+    "log_every": 50,
+    "save_every": 1000
+  }
+}

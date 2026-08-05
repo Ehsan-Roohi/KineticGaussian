@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+data/*.npz
+data/*manifest.json
+!data/manifest.example.json
+runs/
+logs/
+configs/generalization/generated/
+*.pt
+*.out
+*.err
