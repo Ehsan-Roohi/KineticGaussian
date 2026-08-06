@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 def parse_csv(text: str, cast=str) -> list:
@@ -29,6 +30,11 @@ def main() -> None:
     parser.add_argument("--objectives", default="logf,moment")
     parser.add_argument("--conditionings", default="all")
     parser.add_argument("--coordinate-normalization", choices=("per_case", "shared_training"), default="per_case")
+    parser.add_argument(
+        "--run-prefix",
+        default=None,
+        help="Optional collision-safe run-name prefix for diagnostic suites",
+    )
     parser.add_argument("--skip-baselines", action="store_true")
     parser.add_argument("--steps", type=int, default=80000)
     args = parser.parse_args()
@@ -56,6 +62,11 @@ def main() -> None:
     unknown_conditionings = sorted(set(conditionings) - {"all", "amplitude"})
     if unknown_conditionings:
         raise ValueError(f"Unknown conditionings: {unknown_conditionings}")
+    if args.run_prefix is not None and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", args.run_prefix) is None:
+        raise ValueError(
+            "--run-prefix must start with an alphanumeric character and contain only "
+            "letters, numbers, '.', '_' or '-'"
+        )
 
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -96,7 +107,9 @@ def main() -> None:
             for conditioning in conditionings:
                 for seed in seeds:
                     for objective in objectives:
-                        prefix = "conditional" if conditioning == "all" else "conditional_v2_amp"
+                        prefix = args.run_prefix or (
+                            "conditional" if conditioning == "all" else "conditional_v2_amp"
+                        )
                         run_name = f"{prefix}_holdout-{holdout}_N{kernels}_s{seed}_{objective}"
                         cfg = {
                             "run_name": run_name,

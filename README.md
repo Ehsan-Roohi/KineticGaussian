@@ -65,6 +65,30 @@ bash scripts/unity_submit_v2.sh /project/pi_roohie_umass_edu/BGK_shock
 
 Evaluation now reports the nonequilibrium fourth-order diagnostic `M400neq = M400 - 3 rho T^2` when a raw fourth-moment reference is available. The original v1 launcher and checkpoint format remain supported.
 
+## Conditioning/normalization ablation
+
+The v1-to-v2 change altered both Mach conditioning and coordinate normalization. The
+six-run diagnostic suite fills the two missing cells without overwriting either suite:
+
+- all kernel parameters conditioned on Mach with shared training-only normalization,
+  using `N=256` (5,120 parameters);
+- amplitude-only conditioning with per-case normalization, using `N=512` (5,632
+  parameters).
+
+Each cell uses seeds `1234`, `2026`, and `3407` with the moment-aware objective. A
+smoke test gates training, and all-case evaluation on M2.5/M3/M5 is submitted
+automatically after every training task succeeds:
+
+```bash
+bash scripts/unity_submit_ablation.sh /project/pi_roohie_umass_edu/BGK_shock
+```
+
+After the dependent evaluation array completes, compare all four cells with:
+
+```bash
+python scripts/summarize_ablation.py
+```
+
 ## Local validation
 
 ```bash
