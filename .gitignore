@@ -10,6 +10,7 @@ logs/
 configs/generalization/generated/
 configs/generalization/v2_generated/
 configs/generalization/ablation_generated/
+configs/generalization/full_mach_generated/
 *.pt
 *.out
 *.err

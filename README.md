@@ -89,10 +89,41 @@ After the dependent evaluation array completes, compare all four cells with:
 python scripts/summarize_ablation.py
 ```
 
+## Full Mach sweep and blind Mach-12 extrapolation
+
+The Unity archive contains authoritative full-distribution DVM shocks at
+`M=1.5, 2, 2.5, 3, 4, 5, 6, 8, 12`. The imported `dvm/` directory preserves
+the original high-moment solver and Slurm launchers; the multi-gigabyte NPZ
+arrays remain on Unity and are intentionally excluded from Git.
+
+The full-Mach launcher rejects `lite`, smoke, running, incomplete, and known-bad
+archives, checks the required `f,v,w` arrays and high-moment companions, and
+submits 18 moment-aware runs. It compares degree-2 and degree-3 Mach laws over
+three seeds for:
+
+- M3 interpolation;
+- M6 interpolation;
+- blind M12 extrapolation trained only on M1.5 through M8.
+
+Mach normalization is computed from each run's training cases, so M12 does not
+influence its own training bounds. Submit the complete experiment with:
+
+```bash
+bash scripts/unity_submit_full_mach.sh /project/pi_roohie_umass_edu/BGK_shock
+```
+
+The launcher prints the smoke, training-array, and evaluation-array job IDs.
+After all dependent jobs complete, summarize the held-out results with:
+
+```bash
+python scripts/summarize_full_mach.py
+```
+
 ## Local validation
 
 ```bash
 python -m unittest tests/test_conditional_model.py
+python -m unittest tests/test_prepare_generalization_suite.py tests/test_make_full_mach_manifest.py
 python tests/smoke_end_to_end.py
 ```
 

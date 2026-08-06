@@ -15,5 +15,6 @@ cd "$REPO_ROOT"
 mkdir -p logs/conditional
 
 "$PYTHON_BIN" -m unittest tests/test_conditional_model.py
+"$PYTHON_BIN" -m unittest tests/test_prepare_generalization_suite.py tests/test_make_full_mach_manifest.py
 "$PYTHON_BIN" tests/smoke_end_to_end.py
 echo "KINETIC_GAUSSIAN_PREFLIGHT_OK"
