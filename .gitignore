@@ -8,6 +8,8 @@ data/*manifest.json
 runs/
 logs/
 configs/generalization/generated/
+configs/generalization/v2_generated/
+configs/generalization/ablation_generated/
 *.pt
 *.out
 *.err
