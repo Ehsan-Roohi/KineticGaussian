@@ -26,6 +26,22 @@ class ConditionalModelTest(unittest.TestCase):
         prediction = model(mach, z)
         self.assertEqual(tuple(prediction.shape), (5,))
 
+    def test_amplitude_only_conditioning_keeps_kernel_geometry_shared(self) -> None:
+        model = ConditionalPhaseGaussianMixture(
+            num_kernels=7,
+            variant="xvx",
+            mach_degree=1,
+            conditioning="amplitude",
+        )
+        with torch.no_grad():
+            model.log_amp_coeff[1].fill_(0.5)
+        centers, scales, amps, corr = model._conditioned(torch.tensor([-1.0, 1.0]))
+        self.assertTrue(torch.allclose(centers[0], centers[1]))
+        self.assertTrue(torch.allclose(scales[0], scales[1]))
+        self.assertTrue(torch.allclose(corr[0], corr[1]))
+        self.assertFalse(torch.allclose(amps[0], amps[1]))
+        self.assertEqual(model.parameter_count(), 7 * (4 + 4 + 1 + 2))
+
 
 if __name__ == "__main__":
     unittest.main()

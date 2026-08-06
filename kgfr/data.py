@@ -24,6 +24,22 @@ class CoordinateNormalizer:
         halfwidth = np.where(halfwidth <= 0, 1.0, halfwidth).astype(np.float32)
         return cls(center=center.astype(np.float32), halfwidth=halfwidth.astype(np.float32))
 
+    @classmethod
+    def from_bounds(cls, z_min: np.ndarray, z_max: np.ndarray) -> "CoordinateNormalizer":
+        z_min = np.asarray(z_min, dtype=np.float32)
+        z_max = np.asarray(z_max, dtype=np.float32)
+        center = 0.5 * (z_min + z_max)
+        halfwidth = 0.5 * (z_max - z_min)
+        halfwidth = np.where(halfwidth <= 0, 1.0, halfwidth).astype(np.float32)
+        return cls(center=center.astype(np.float32), halfwidth=halfwidth)
+
+    @classmethod
+    def from_state_dict(cls, state: Dict[str, list]) -> "CoordinateNormalizer":
+        return cls(
+            center=np.asarray(state["center"], dtype=np.float32),
+            halfwidth=np.asarray(state["halfwidth"], dtype=np.float32),
+        )
+
     def normalize_z(self, z: np.ndarray) -> np.ndarray:
         return ((z - self.center[None, :]) / self.halfwidth[None, :]).astype(np.float32)
 
@@ -40,7 +56,13 @@ class CoordinateNormalizer:
 class ShockFullState:
     """Loads one full-state DVM shock NPZ and provides phase-space sampling."""
 
-    def __init__(self, path: str | Path, moment_path: str | Path | None = None, f_floor: float = 1e-35):
+    def __init__(
+        self,
+        path: str | Path,
+        moment_path: str | Path | None = None,
+        f_floor: float = 1e-35,
+        normalizer: CoordinateNormalizer | None = None,
+    ):
         self.path = Path(path)
         if not self.path.exists():
             raise FileNotFoundError(f"Full-state file not found: {self.path}")
@@ -67,7 +89,7 @@ class ShockFullState:
         if self.w.shape[0] != self.Nv:
             raise ValueError(f"Expected w shape ({self.Nv},), got {self.w.shape}")
         self.f_floor = float(f_floor)
-        self.norm = CoordinateNormalizer.from_x_v(self.x, self.v)
+        self.norm = normalizer or CoordinateNormalizer.from_x_v(self.x, self.v)
         self.v_norm = ((self.v - self.norm.center[None, 1:]) / self.norm.halfwidth[None, 1:]).astype(np.float32)
         self.x_norm = ((self.x - self.norm.center[0]) / self.norm.halfwidth[0]).astype(np.float32)
         self.moment_ref: Dict[str, np.ndarray] = {
@@ -92,9 +114,38 @@ class ShockFullState:
                 self.moment_ref["M300"] = self.moment_ref["M300_neq"]
             if "M400_raw" in self.moment_ref:
                 self.moment_ref["M400"] = self.moment_ref["M400_raw"]
+        if "M300" not in self.moment_ref or "M400" not in self.moment_ref:
+            derived_m300, derived_m400 = self._derive_longitudinal_moments()
+            self.moment_ref.setdefault("M300", derived_m300)
+            self.moment_ref.setdefault("M400", derived_m400)
+        if "M400_neq" in self.moment_ref:
+            self.moment_ref["M400neq"] = self.moment_ref["M400_neq"]
+        else:
+            self.moment_ref["M400neq"] = (
+                self.moment_ref["M400"] - 3.0 * self.rho * self.T**2
+            ).astype(np.float32)
         self.moment_scales = {k: rms_scale(v) for k, v in self.moment_ref.items() if np.ndim(v) == 1}
         self._x_sampling_p = self._build_x_sampling_weights()
         self._torch_cache: Dict[str, torch.Tensor] = {}
+
+    def _derive_longitudinal_moments(self, velocity_chunk: int = 16384) -> tuple[np.ndarray, np.ndarray]:
+        """Integrate central third/fourth streamwise moments without a large temporary phase array."""
+        m300 = np.zeros(self.Nx, dtype=np.float64)
+        m400 = np.zeros(self.Nx, dtype=np.float64)
+        ux = self.ux.astype(np.float64)
+        for j0 in range(0, self.Nv, velocity_chunk):
+            j1 = min(self.Nv, j0 + velocity_chunk)
+            cx = self.v[None, j0:j1, 0].astype(np.float64) - ux[:, None]
+            fw = self.f[:, j0:j1].astype(np.float64) * self.w[None, j0:j1].astype(np.float64)
+            m300 += np.sum(fw * cx**3, axis=1)
+            m400 += np.sum(fw * cx**4, axis=1)
+        return m300.astype(np.float32), m400.astype(np.float32)
+
+    def set_coordinate_normalizer(self, normalizer: CoordinateNormalizer) -> None:
+        self.norm = normalizer
+        self.v_norm = ((self.v - self.norm.center[None, 1:]) / self.norm.halfwidth[None, 1:]).astype(np.float32)
+        self.x_norm = ((self.x - self.norm.center[0]) / self.norm.halfwidth[0]).astype(np.float32)
+        self._torch_cache.clear()
 
     def _build_x_sampling_weights(self) -> np.ndarray:
         gr = np.gradient(self.rho.astype(np.float64))

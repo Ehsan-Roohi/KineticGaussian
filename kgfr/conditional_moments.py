@@ -65,6 +65,7 @@ def moments_from_conditional_model(
         m300 += torch.sum(fw * cx**3, dim=1)
         m400 += torch.sum(fw * cx**4, dim=1)
     sig = sxx_raw - rho * temperature
+    m400neq = m400 - 3.0 * rho * temperature**2
     return {
         "rho": rho,
         "ux": u[:, 0],
@@ -76,6 +77,7 @@ def moments_from_conditional_model(
         "sigma_xx": sig,
         "M300": m300,
         "M400": m400,
+        "M400neq": m400neq,
     }
 
 
@@ -149,6 +151,7 @@ def sampled_conditional_moment_loss(
         "M300": torch.sum(fw * cx**3, dim=1),
         "M400": torch.sum(fw * cx**4, dim=1),
     }
+    pred["M400neq"] = pred["M400"] - 3.0 * rho * temperature**2
     ref = data.reference_for_keys(keys, ix, device=device)
     loss = torch.zeros((), device=device)
     terms: Dict[str, float] = {}

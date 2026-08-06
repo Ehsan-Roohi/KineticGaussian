@@ -9,7 +9,7 @@ from typing import Dict, Iterable, List, Sequence
 import numpy as np
 import torch
 
-from .data import ShockFullState
+from .data import CoordinateNormalizer, ShockFullState
 
 
 @dataclass(frozen=True)
@@ -72,8 +72,9 @@ def select_case_specs(specs: Sequence[ShockCaseSpec], names: Iterable[str]) -> L
 class ParametricShockDataset:
     """A collection of DVM shocks sampled uniformly by flow case.
 
-    Each case keeps its original physical quadrature and its own affine map of
-    (x,vx,vy,vz) to [-1,1]^4. Mach number uses one fixed map shared by every
+    Each case keeps its original physical quadrature. Coordinates can use
+    either per-case affine maps (v1 compatibility) or one map computed only
+    from the training cases. Mach number uses one fixed map shared by every
     training and held-out case. No held-out distribution values are loaded.
     """
 
@@ -82,6 +83,7 @@ class ParametricShockDataset:
         specs: Sequence[ShockCaseSpec],
         mach_bounds: Sequence[float],
         f_floor: float = 1.0e-35,
+        coordinate_normalization: str = "per_case",
     ) -> None:
         if len(specs) < 1:
             raise ValueError("At least one training case is required")
@@ -92,6 +94,10 @@ class ParametricShockDataset:
         self.mach_max = float(mach_bounds[1])
         self.mach_center = 0.5 * (self.mach_min + self.mach_max)
         self.mach_halfwidth = 0.5 * (self.mach_max - self.mach_min)
+        if coordinate_normalization not in {"per_case", "shared_training"}:
+            raise ValueError(f"Unknown coordinate_normalization: {coordinate_normalization}")
+        self.coordinate_normalization = coordinate_normalization
+        self.common_normalizer: CoordinateNormalizer | None = None
         self.cases: Dict[str, ShockFullState] = {}
         for spec in self.specs:
             self.cases[spec.name] = ShockFullState(
@@ -99,6 +105,34 @@ class ParametricShockDataset:
                 moment_path=spec.moment_path,
                 f_floor=f_floor,
             )
+        if self.coordinate_normalization == "shared_training":
+            z_min = np.min(
+                np.stack(
+                    [
+                        np.array(
+                            [case.x.min(), case.v[:, 0].min(), case.v[:, 1].min(), case.v[:, 2].min()],
+                            dtype=np.float32,
+                        )
+                        for case in self.cases.values()
+                    ]
+                ),
+                axis=0,
+            )
+            z_max = np.max(
+                np.stack(
+                    [
+                        np.array(
+                            [case.x.max(), case.v[:, 0].max(), case.v[:, 1].max(), case.v[:, 2].max()],
+                            dtype=np.float32,
+                        )
+                        for case in self.cases.values()
+                    ]
+                ),
+                axis=0,
+            )
+            self.common_normalizer = CoordinateNormalizer.from_bounds(z_min, z_max)
+            for case in self.cases.values():
+                case.set_coordinate_normalizer(self.common_normalizer)
 
     def normalize_mach(self, mach: float) -> float:
         return float((float(mach) - self.mach_center) / self.mach_halfwidth)
@@ -150,10 +184,11 @@ class ParametricShockDataset:
         return mach[order], z[order]
 
     def coordinate_state(self) -> dict:
-        return {
+        state = {
             "mach_bounds": [self.mach_min, self.mach_max],
             "mach_center": self.mach_center,
             "mach_halfwidth": self.mach_halfwidth,
+            "coordinate_normalization": self.coordinate_normalization,
             "cases": {
                 spec.name: {
                     "mach": spec.mach,
@@ -162,6 +197,9 @@ class ParametricShockDataset:
                 for spec in self.specs
             },
         }
+        if self.common_normalizer is not None:
+            state["common_normalizer"] = self.common_normalizer.state_dict()
+        return state
 
     def summary(self) -> str:
         rows = [

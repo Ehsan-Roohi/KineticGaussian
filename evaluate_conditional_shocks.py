@@ -12,7 +12,7 @@ import torch
 
 from kgfr.conditional_models import ConditionalPhaseGaussianMixture
 from kgfr.conditional_moments import moments_from_conditional_model
-from kgfr.data import ShockFullState
+from kgfr.data import CoordinateNormalizer, ShockFullState
 from kgfr.parametric_data import load_case_manifest, select_case_specs
 from kgfr.plots import plot_ladder, plot_moment_profiles
 from kgfr.utils import choose_device, load_json, set_seed
@@ -24,6 +24,7 @@ def model_from_config(cfg: dict) -> ConditionalPhaseGaussianMixture:
         num_kernels=int(model_cfg.get("num_kernels", 512)),
         variant=str(model_cfg.get("variant", "xvx")),
         mach_degree=int(model_cfg.get("mach_degree", 2)),
+        conditioning=str(model_cfg.get("conditioning", "all")),
         log_scale_min=float(model_cfg.get("log_scale_min", -6.0)),
         log_scale_max=float(model_cfg.get("log_scale_max", -0.7)),
         init_log_scale=float(model_cfg.get("init_log_scale", -2.4)),
@@ -127,6 +128,11 @@ def main() -> None:
     parser.add_argument("--x-chunk", type=int, default=16)
     parser.add_argument("--v-chunk", type=int, default=2048)
     parser.add_argument("--sample-points", type=int, default=50000)
+    parser.add_argument(
+        "--output-subdir",
+        default="eval",
+        help="Run-directory subfolder for metrics and plots (use a new name to preserve prior evaluation output)",
+    )
     args = parser.parse_args()
 
     cfg = load_json(args.config)
@@ -151,7 +157,7 @@ def main() -> None:
     holdout_names = set(cfg.get("holdout_cases", []))
 
     run_dir = Path(cfg.get("output_dir", "runs/conditional")) / cfg["run_name"]
-    output_dir = run_dir / "eval"
+    output_dir = run_dir / args.output_subdir
     output_dir.mkdir(parents=True, exist_ok=True)
     parameter_count = model.parameter_count()
     representation_bytes = int(sum(t.numel() * t.element_size() for t in model.state_dict().values()))
@@ -164,12 +170,20 @@ def main() -> None:
     }
 
     keys = list(cfg.get("evaluation", {}).get("moment_keys", ["rho", "ux", "T", "qx", "sig", "M300", "M400"]))
+    if "M400" in keys and "M400neq" not in keys:
+        keys.append("M400neq")
+    coordinate_state = checkpoint.get("coordinate_state", {})
+    normalizer_state = coordinate_state.get("common_normalizer")
+    shared_normalizer = None
+    if normalizer_state is not None:
+        shared_normalizer = CoordinateNormalizer.from_state_dict(normalizer_state)
     for spec in selected:
         print(f"[kinetic-gaussian] evaluating {spec.name} (M={spec.mach:g})", flush=True)
         data = ShockFullState(
             spec.data_path,
             moment_path=spec.moment_path,
             f_floor=float(cfg.get("sampling", {}).get("f_floor", 1.0e-35)),
+            normalizer=shared_normalizer,
         )
         mach_norm = (spec.mach - mach_center) / mach_halfwidth
         x, prediction, reference, errors = evaluate_moments(

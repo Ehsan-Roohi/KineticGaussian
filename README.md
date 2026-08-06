@@ -45,6 +45,26 @@ The script discovers the existing M2.5, M3, and M5 full-state files, validates t
 
 Override it when needed with `KGFR_PYTHON=/path/to/python`.
 
+## Diagnostic evaluation of existing checkpoints
+
+Evaluate every completed v1 checkpoint on the two training cases and the held-out M3 case without overwriting the original held-out outputs:
+
+```bash
+bash scripts/unity_submit_endpoint_eval.sh
+```
+
+Results are written under `eval_all_cases/`. Comparing training-case and held-out errors distinguishes representation underfitting from failure to interpolate in Mach number.
+
+## Version 2 held-out-Mach suite
+
+Version 2 fixes one Gaussian geometry across Mach number and conditions only the positive kernel amplitudes. It also uses one coordinate normalization computed exclusively from the M2.5 and M5 training domains. This prevents kernel identities from crossing or permuting with Mach and avoids case-specific coordinate maps. Submit the nine-run `N=128,256,512`, three-seed, moment-aware suite with:
+
+```bash
+bash scripts/unity_submit_v2.sh /project/pi_roohie_umass_edu/BGK_shock
+```
+
+Evaluation now reports the nonequilibrium fourth-order diagnostic `M400neq = M400 - 3 rho T^2` when a raw fourth-moment reference is available. The original v1 launcher and checkpoint format remain supported.
+
 ## Local validation
 
 ```bash

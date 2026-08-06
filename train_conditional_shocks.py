@@ -35,6 +35,7 @@ def model_from_config(cfg: dict) -> ConditionalPhaseGaussianMixture:
         num_kernels=int(model_cfg.get("num_kernels", 512)),
         variant=str(model_cfg.get("variant", "xvx")),
         mach_degree=int(model_cfg.get("mach_degree", 2)),
+        conditioning=str(model_cfg.get("conditioning", "all")),
         log_scale_min=float(model_cfg.get("log_scale_min", -6.0)),
         log_scale_max=float(model_cfg.get("log_scale_max", -0.7)),
         init_log_scale=float(model_cfg.get("init_log_scale", -2.4)),
@@ -130,6 +131,7 @@ def main() -> None:
         train_specs,
         mach_bounds=mach_bounds,
         f_floor=float(sampling_cfg.get("f_floor", 1.0e-35)),
+        coordinate_normalization=str(cfg.get("data", {}).get("coordinate_normalization", "per_case")),
     )
     print(data.summary(), flush=True)
 

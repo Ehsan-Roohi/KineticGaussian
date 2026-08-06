@@ -19,6 +19,7 @@ class ConditionalPhaseGaussianMixture(nn.Module):
         num_kernels: int,
         variant: str = "xvx",
         mach_degree: int = 2,
+        conditioning: str = "all",
         dim: int = 4,
         log_scale_min: float = -6.0,
         log_scale_max: float = -0.7,
@@ -30,21 +31,25 @@ class ConditionalPhaseGaussianMixture(nn.Module):
             raise ValueError("dim must be 4 for (x,vx,vy,vz)")
         if variant not in {"diag", "xvx"}:
             raise ValueError(f"Unknown conditional variant: {variant}")
+        if conditioning not in {"all", "amplitude"}:
+            raise ValueError(f"Unknown Mach conditioning mode: {conditioning}")
         if mach_degree < 0 or mach_degree > 5:
             raise ValueError("mach_degree must be between 0 and 5")
         self.num_kernels = int(num_kernels)
         self.variant = variant
         self.mach_degree = int(mach_degree)
+        self.conditioning = conditioning
         self.dim = int(dim)
         self.log_scale_min = float(log_scale_min)
         self.log_scale_max = float(log_scale_max)
         terms = self.mach_degree + 1
+        geometry_terms = terms if self.conditioning == "all" else 1
 
-        center = torch.zeros(terms, self.num_kernels, self.dim)
+        center = torch.zeros(geometry_terms, self.num_kernels, self.dim)
         center[0] = 0.2 * torch.randn(self.num_kernels, self.dim)
         self.center_coeff = nn.Parameter(center)
 
-        scale = torch.zeros(terms, self.num_kernels, self.dim)
+        scale = torch.zeros(geometry_terms, self.num_kernels, self.dim)
         scale[0] = self._inverse_bound(torch.full((self.num_kernels, self.dim), float(init_log_scale)))
         scale[0] += 0.05 * torch.randn(self.num_kernels, self.dim)
         self.scale_coeff = nn.Parameter(scale)
@@ -54,7 +59,7 @@ class ConditionalPhaseGaussianMixture(nn.Module):
         self.log_amp_coeff = nn.Parameter(amp)
 
         if self.variant == "xvx":
-            self.corr_coeff = nn.Parameter(torch.zeros(terms, self.num_kernels))
+            self.corr_coeff = nn.Parameter(torch.zeros(geometry_terms, self.num_kernels))
         else:
             self.register_parameter("corr_coeff", None)
 
@@ -77,8 +82,9 @@ class ConditionalPhaseGaussianMixture(nn.Module):
 
     def _conditioned(self, mach: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         phi = self.mach_features(mach)
-        centers_raw = torch.einsum("bt,tnd->bnd", phi, self.center_coeff)
-        scale_raw = torch.einsum("bt,tnd->bnd", phi, self.scale_coeff)
+        geometry_phi = phi[:, : self.center_coeff.shape[0]]
+        centers_raw = torch.einsum("bt,tnd->bnd", geometry_phi, self.center_coeff)
+        scale_raw = torch.einsum("bt,tnd->bnd", geometry_phi, self.scale_coeff)
         log_amp = torch.einsum("bt,tn->bn", phi, self.log_amp_coeff)
         centers = 1.15 * torch.tanh(centers_raw)
         log_scales = self.log_scale_min + (
@@ -87,7 +93,8 @@ class ConditionalPhaseGaussianMixture(nn.Module):
         scales = torch.exp(log_scales)
         corr = None
         if self.corr_coeff is not None:
-            corr = 0.95 * torch.tanh(torch.einsum("bt,tn->bn", phi, self.corr_coeff))
+            corr_phi = phi[:, : self.corr_coeff.shape[0]]
+            corr = 0.95 * torch.tanh(torch.einsum("bt,tn->bn", corr_phi, self.corr_coeff))
         return centers, scales, log_amp, corr
 
     def forward(self, mach: torch.Tensor | float, z: torch.Tensor) -> torch.Tensor:
@@ -135,6 +142,7 @@ class ConditionalPhaseGaussianMixture(nn.Module):
         return {
             "model_class": self.__class__.__name__,
             "variant": self.variant,
+            "conditioning": self.conditioning,
             "num_kernels": self.num_kernels,
             "mach_degree": self.mach_degree,
             "parameter_count": self.parameter_count(),

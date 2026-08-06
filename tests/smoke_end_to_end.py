@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import torch
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -55,9 +56,11 @@ def main() -> None:
             "train_cases": ["M2p5", "M5"],
             "holdout_cases": ["M3"],
             "eval_cases": ["M3"],
+            "data": {"coordinate_normalization": "shared_training"},
             "model": {
                 "variant": "xvx",
                 "mach_degree": 1,
+                "conditioning": "amplitude",
                 "num_kernels": 8,
                 "init_samples": 64,
                 "log_scale_min": -5.0,
@@ -67,7 +70,7 @@ def main() -> None:
             },
             "sampling": {"x_batch": 2, "vel_per_x": 12, "uniform_vel_frac": 0.2, "mass_alpha": 0.7},
             "train": {"steps": 3, "lr": 0.001, "warmup_steps": 1, "log_every": 1, "save_every": 3, "lambda_moment": 0.0},
-            "evaluation": {"moment_keys": ["rho", "ux", "T", "qx", "sig"]},
+            "evaluation": {"moment_keys": ["rho", "ux", "T", "qx", "sig", "M400", "M400neq"]},
         }
         config_path = root / "config.json"
         config_path.write_text(json.dumps(config), encoding="utf-8")
@@ -91,6 +94,10 @@ def main() -> None:
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         assert metrics["cases"]["M3"]["split"] == "holdout"
         assert metrics["cases"]["M3"]["sample_points"] == 128
+        assert "M400neq" in metrics["cases"]["M3"]["moment_relative_l2"]
+        checkpoint_state = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        assert checkpoint_state["coordinate_state"]["coordinate_normalization"] == "shared_training"
+        assert "common_normalizer" in checkpoint_state["coordinate_state"]
         print(f"SMOKE_OK {metrics_path}")
 
 
