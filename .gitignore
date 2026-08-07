@@ -11,6 +11,8 @@ configs/generalization/generated/
 configs/generalization/v2_generated/
 configs/generalization/ablation_generated/
 configs/generalization/full_mach_generated/
+configs/dvm_jcp_generated/
+dvm/audit/
 *.pt
 *.out
 *.err

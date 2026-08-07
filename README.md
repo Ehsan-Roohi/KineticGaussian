@@ -163,3 +163,49 @@ Expected NPZ keys are `x`, `f`, `v`, `w`, `rho`, `ux`, `T`, `qx`, and `sig` or `
 ## Reproducibility note
 
 The repository intentionally excludes DVM arrays, checkpoints, and generated configs. The Unity launcher records absolute source paths and every hyperparameter in each generated config. Do not interpret the synthetic smoke-test errors as scientific results; only completed Unity DVM runs belong in the paper.
+
+## JCP high-Mach DVM certification campaign
+
+The legacy high-Mach references used a uniform velocity cube.  At M12 its
+transverse spacing was too coarse to make the nominal far-field Maxwellian
+stress and fourth-order nonequilibrium moment vanish.  The JCP campaign fixes
+this before any new KGFR training:
+
+- a CPU audit evaluates upstream and downstream Rankine--Hugoniot Maxwellians;
+- a composite Gauss--Legendre velocity grid resolves both the narrow upstream
+  and hot downstream states without an unaffordable uniform cube;
+- nonequilibrium `qx`, `sig`, `M300`, and `M400` are saved from `f-Md`, where
+  `Md` is the local conservative discrete Maxwellian;
+- combined spatial/velocity convergence is run at M6 and M12;
+- a strict medium-to-fine gate must pass before production M7, M8, and M10
+  jobs are released;
+- M6/M7/M8 use FP64 GPUs with at least 48 GB VRAM, while M10/M12 use FP64
+  GPUs with at least 80 GB VRAM.
+
+The complete campaign is self-contained in this repository.  Large NPZ files
+remain under the supplied BGK data root and are never committed.  Submit from
+the `KineticGaussian` checkout on Unity:
+
+```bash
+bash dvm/scripts/unity_submit_jcp_dvm.sh /project/pi_roohie_umass_edu/BGK_shock
+```
+
+The command performs the cheap quadrature audit synchronously, creates six
+convergence tasks (M6/M12 at coarse, medium, and fine levels), submits the
+convergence gate, and queues three production tasks (M7/M8/M10) behind that
+gate.  Production jobs remain in dependency state if convergence fails.
+
+Monitor the full dependency chain with:
+
+```bash
+bash dvm/scripts/unity_status_jcp_dvm.sh
+```
+
+Certified outputs are written to:
+
+```text
+/project/pi_roohie_umass_edu/BGK_shock/ref/jcp_velocity_certified/
+```
+
+The manifest discovery script recognizes M7 and M10 and preferentially uses
+the certified medium grid after the convergence gate has passed.

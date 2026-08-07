@@ -108,6 +108,16 @@ class ShockFullState:
                     self.moment_ref[k] = np.asarray(arr, dtype=np.float32)
             if "sigma_xx" in self.moment_ref:
                 self.moment_ref["sig"] = self.moment_ref["sigma_xx"]
+            # High-Mach DVM references may provide moments of f-Md, where Md
+            # is the local conservative discrete Maxwellian.  Prefer these
+            # quadrature-offset-free diagnostics over raw continuum
+            # subtractions when they are available.
+            if "qx_neq_discrete" in self.moment_ref:
+                self.moment_ref["qx"] = self.moment_ref["qx_neq_discrete"]
+                self.qx = self.moment_ref["qx"]
+            if "sig_neq_discrete" in self.moment_ref:
+                self.moment_ref["sig"] = self.moment_ref["sig_neq_discrete"]
+                self.sig = self.moment_ref["sig"]
             # Aliases so phase-space moment_loss can train model M300/M400
             # against high-moment diagnostics from the DVM file.
             if "M300_neq" in self.moment_ref:

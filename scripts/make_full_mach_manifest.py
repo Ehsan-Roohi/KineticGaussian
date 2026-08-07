@@ -16,7 +16,9 @@ DEFAULT_CASES = {
     "M4": 4.0,
     "M5": 5.0,
     "M6": 6.0,
+    "M7": 7.0,
     "M8": 8.0,
+    "M10": 10.0,
     "M12": 12.0,
 }
 
@@ -24,6 +26,9 @@ REQUIRED_FULLSTATE_KEYS = {"x", "f", "v", "w", "rho", "ux", "T", "qx"}
 HIGH_MOMENT_KEYS = {
     "M300_neq",
     "M400_raw",
+    "M400_neq",
+    "qx_neq_discrete",
+    "sig_neq_discrete",
     "mxxx",
     "Rxx_neq",
     "Rxx_closure",
@@ -71,6 +76,15 @@ def tag_matches(path: Path, tag: str) -> bool:
 
 def fullstate_score(path: Path, tag: str) -> tuple[int, int, str]:
     score = 0
+    lowered_parts = {part.lower() for part in path.parts}
+    if "jcp_velocity_certified" in lowered_parts:
+        score += 300
+        if "medium" in lowered_parts:
+            score += 60
+        elif "fine" in lowered_parts:
+            score += 40
+        elif "coarse" in lowered_parts:
+            score -= 40
     if path.name.endswith("_fullstate_fullstate.npz"):
         score += 100
     elif path.name.endswith("_fullstate.npz"):
@@ -86,7 +100,11 @@ def fullstate_score(path: Path, tag: str) -> tuple[int, int, str]:
 
 def discover_fullstate(root: Path, tag: str) -> tuple[Path, set[str]]:
     candidates: list[tuple[Path, set[str]]] = []
-    for search_root in (root / "ref" / "mach_sweep", root / "ref" / "mach_sweep_extra"):
+    for search_root in (
+        root / "ref" / "jcp_velocity_certified",
+        root / "ref" / "mach_sweep",
+        root / "ref" / "mach_sweep_extra",
+    ):
         if not search_root.exists():
             continue
         for path in search_root.rglob("*.npz"):
@@ -115,7 +133,11 @@ def discover_moment_file(root: Path, tag: str, data_path: Path, data_keys: set[s
         return data_path, data_keys
 
     candidates: list[Path] = companion_candidates(data_path)
-    for search_root in (root / "ref" / "mach_sweep", root / "ref" / "mach_sweep_extra"):
+    for search_root in (
+        root / "ref" / "jcp_velocity_certified",
+        root / "ref" / "mach_sweep",
+        root / "ref" / "mach_sweep_extra",
+    ):
         if search_root.exists():
             candidates.extend(search_root.rglob(f"*{tag}*hmom*.npz"))
 

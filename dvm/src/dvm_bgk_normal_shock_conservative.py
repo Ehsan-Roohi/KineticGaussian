@@ -27,10 +27,30 @@ def normal_shock_states(M1=2.0, gamma=5.0/3.0, rho1=1.0, T1=1.0):
     }
 
 
-def make_vgrid(nvx, nvy, nvz, vmax, device, dtype):
-    vx = torch.linspace(-vmax, vmax, nvx, device=device, dtype=dtype)
-    vy = torch.linspace(-vmax, vmax, nvy, device=device, dtype=dtype)
-    vz = torch.linspace(-vmax, vmax, nvz, device=device, dtype=dtype)
+def make_vgrid(
+    nvx,
+    nvy,
+    nvz,
+    vmax,
+    device,
+    dtype,
+    axis_nodes=None,
+    axis_weights=None,
+):
+    """Construct a tensor velocity quadrature.
+
+    ``axis_nodes``/``axis_weights`` allow the high-Mach solver to use the
+    certified composite Gauss--Legendre grid.  Omitting them preserves the
+    original uniform-cube behavior and checkpoint reproducibility.
+    """
+    if axis_nodes is None:
+        vx = torch.linspace(-vmax, vmax, nvx, device=device, dtype=dtype)
+        vy = torch.linspace(-vmax, vmax, nvy, device=device, dtype=dtype)
+        vz = torch.linspace(-vmax, vmax, nvz, device=device, dtype=dtype)
+    else:
+        if axis_weights is None or len(axis_nodes) != 3 or len(axis_weights) != 3:
+            raise ValueError("axis_nodes and axis_weights must each contain three arrays")
+        vx, vy, vz = [torch.as_tensor(values, device=device, dtype=dtype) for values in axis_nodes]
 
     def trap_w(n, h):
         w = torch.ones(n, device=device, dtype=dtype)*h
@@ -38,9 +58,12 @@ def make_vgrid(nvx, nvy, nvz, vmax, device, dtype):
         w[-1] *= 0.5
         return w
 
-    wx = trap_w(nvx, 2*vmax/(nvx-1))
-    wy = trap_w(nvy, 2*vmax/(nvy-1))
-    wz = trap_w(nvz, 2*vmax/(nvz-1))
+    if axis_nodes is None:
+        wx = trap_w(nvx, 2*vmax/(nvx-1))
+        wy = trap_w(nvy, 2*vmax/(nvy-1))
+        wz = trap_w(nvz, 2*vmax/(nvz-1))
+    else:
+        wx, wy, wz = [torch.as_tensor(values, device=device, dtype=dtype) for values in axis_weights]
 
     VX, VY, VZ = torch.meshgrid(vx, vy, vz, indexing="ij")
     W = wx[:, None, None]*wy[None, :, None]*wz[None, None, :]
@@ -69,6 +92,18 @@ def moments(f, v, v2, w):
     sig = torch.sum((cx**2 - c2/3.0)*f*w[None, :], dim=1)
 
     return rho, ux, T, qx, sig
+
+
+def moments_chunked(f, v, v2, w, x_chunk=64):
+    """Evaluate moments without materializing full ``Nx x Nv`` temporaries."""
+    nx = f.shape[0]
+    outputs = [torch.empty(nx, device=f.device, dtype=f.dtype) for _ in range(5)]
+    for i0 in range(0, nx, x_chunk):
+        i1 = min(nx, i0 + x_chunk)
+        values = moments(f[i0:i1], v, v2, w)
+        for target, value in zip(outputs, values):
+            target[i0:i1] = value
+    return tuple(outputs)
 
 
 def conservative_discrete_maxwellian(v, v2, w, rho_target, u_target, T_target, niter=5):
@@ -160,6 +195,74 @@ def conservative_discrete_maxwellian(v, v2, w, rho_target, u_target, T_target, n
     scale = rho_target/(Z0 + 1.0e-30)
     M = scale[:, None]*M0
     return torch.clamp(M, min=1.0e-30)
+
+
+def conservative_discrete_maxwellian_chunked(
+    v,
+    v2,
+    w,
+    rho_target,
+    u_target,
+    T_target,
+    niter=5,
+    x_chunk=64,
+):
+    """Construct local discrete Maxwellians with bounded accelerator memory."""
+    nx = rho_target.numel()
+    result = torch.empty((nx, v.shape[0]), device=v.device, dtype=v.dtype)
+    for i0 in range(0, nx, x_chunk):
+        i1 = min(nx, i0 + x_chunk)
+        result[i0:i1] = conservative_discrete_maxwellian(
+            v,
+            v2,
+            w,
+            rho_target[i0:i1],
+            u_target[i0:i1],
+            T_target[i0:i1],
+            niter=niter,
+        )
+    return result
+
+
+def advance_bgk_chunked(f, ML, MR, v, v2, w, dx, dt, corr_iters=4, x_chunk=64):
+    """Advance one upwind/BGK step with peak memory proportional to x_chunk."""
+    nx = f.shape[0]
+    output = torch.empty_like(f)
+    positive = v[:, 0] > 0
+    negative = v[:, 0] < 0
+    nonnegative = v[:, 0] >= 0
+    relaxation = math.exp(-dt)
+    for i0 in range(0, nx, x_chunk):
+        i1 = min(nx, i0 + x_chunk)
+        current = f[i0:i1]
+        left_head = ML[None, :] if i0 == 0 else f[i0 - 1:i0]
+        left = torch.cat([left_head, f[i0:i1 - 1]], dim=0)
+        right_tail = MR[None, :] if i1 == nx else f[i1:i1 + 1]
+        right = torch.cat([f[i0 + 1:i1], right_tail], dim=0)
+        derivative = torch.where(
+            nonnegative[None, :],
+            (current - left) / dx,
+            (right - current) / dx,
+        )
+        fstar = torch.clamp(current - dt * v[None, :, 0] * derivative, min=1.0e-30)
+        if i0 == 0:
+            fstar[0, positive] = ML[positive]
+        if i1 == nx:
+            fstar[-1, negative] = MR[negative]
+        rho, ux, temperature, _, _ = moments(fstar, v, v2, w)
+        local_maxwellian = conservative_discrete_maxwellian(
+            v, v2, w, rho, ux, temperature, niter=corr_iters
+        )
+        updated = torch.clamp(
+            local_maxwellian + (fstar - local_maxwellian) * relaxation,
+            min=1.0e-30,
+        )
+        if i0 == 0:
+            updated[0, positive] = ML[positive]
+        if i1 == nx:
+            updated[-1, negative] = MR[negative]
+        output[i0:i1] = updated
+    return output
 
 
 def state_maxwellian(v, v2, w, rho, u, T):

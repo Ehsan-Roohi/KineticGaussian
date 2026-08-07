@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import argparse
-import math
 import sys
 from pathlib import Path
 
@@ -17,9 +16,17 @@ from dvm_bgk_normal_shock_conservative import (
     make_vgrid,
     state_maxwellian,
     moments,
+    moments_chunked,
     conservative_discrete_maxwellian,
+    conservative_discrete_maxwellian_chunked,
+    advance_bgk_chunked,
     find_crossing,
     recenter_f,
+)
+from dvm_velocity_grid import (
+    CompositeGridSpec,
+    composite_velocity_quadrature,
+    grid_metadata,
 )
 
 
@@ -42,7 +49,9 @@ def higher_moments(f, v, v2, w, rho, ux, T, qx, sig, chunk=64):
 
     keys = [
         "M300_neq", "M120_neq", "M102_neq",
-        "M400_raw", "M220_raw", "M202_raw", "M040_raw",
+        "M400_raw", "M400_neq", "M400_eq_discrete", "M400_continuum_excess",
+        "M220_raw", "M202_raw", "M040_raw",
+        "qx_neq_discrete", "sig_neq_discrete",
         "mxxx", "Rxx_neq", "Rxx_closure",
         "skewx_neq", "kurtx_raw",
         "Qxx_bgk", "Qx_bgk",
@@ -60,8 +69,6 @@ def higher_moments(f, v, v2, w, rho, ux, T, qx, sig, chunk=64):
         rhoi = rho[i0:i1]
         uxi = ux[i0:i1]
         Ti = T[i0:i1]
-        qi = qx[i0:i1]
-        si = sig[i0:i1]
 
         # Local conservative discrete Maxwellian for exact equilibrium subtraction.
         Md = conservative_discrete_maxwellian(v, v2, w, rhoi, uxi, Ti, niter=4)
@@ -77,9 +84,14 @@ def higher_moments(f, v, v2, w, rho, ux, T, qx, sig, chunk=64):
         M300_neq = torch.sum(Gi * ww * Cx**3, dim=1)
         M120_neq = torch.sum(Gi * ww * Cx * Cy**2, dim=1)
         M102_neq = torch.sum(Gi * ww * Cx * Cz**2, dim=1)
+        qx_neq_discrete = 0.5 * torch.sum(Gi * ww * C2 * Cx, dim=1)
+        sig_neq_discrete = torch.sum(Gi * ww * (Cx**2 - C2 / 3.0), dim=1)
 
         # Raw even moments kept only for diagnostics/kurtosis.
         M400_raw = torch.sum(Fi * ww * Cx**4, dim=1)
+        M400_eq_discrete = torch.sum(Md * ww * Cx**4, dim=1)
+        M400_neq = torch.sum(Gi * ww * Cx**4, dim=1)
+        M400_continuum_excess = M400_raw - 3.0 * rhoi * Ti**2
         M220_raw = torch.sum(Fi * ww * Cx**2 * Cy**2, dim=1)
         M202_raw = torch.sum(Fi * ww * Cx**2 * Cz**2, dim=1)
         M040_raw = torch.sum(Fi * ww * Cy**4, dim=1)
@@ -90,11 +102,11 @@ def higher_moments(f, v, v2, w, rho, ux, T, qx, sig, chunk=64):
 
         # Optional closure residual after removing leading Grad-13 stress contribution.
         # This is diagnostic only; for paper use both Rxx_neq and Rxx_closure.
-        Rxx_closure = Rxx_neq - 7.0 * Ti * si
+        Rxx_closure = Rxx_neq - 7.0 * Ti * sig_neq_discrete
 
         # BGK production terms for stress and heat flux modes.
-        Qxx_bgk = -si
-        Qx_bgk = -2.0 * qi
+        Qxx_bgk = -sig_neq_discrete
+        Qx_bgk = -2.0 * qx_neq_discrete
 
         skewx_neq = M300_neq / torch.clamp(rhoi * Ti**1.5, min=eps)
         kurtx_raw = M400_raw / torch.clamp(rhoi * Ti**2, min=eps)
@@ -109,7 +121,12 @@ def higher_moments(f, v, v2, w, rho, ux, T, qx, sig, chunk=64):
         out["M300_neq"][sl] = M300_neq
         out["M120_neq"][sl] = M120_neq
         out["M102_neq"][sl] = M102_neq
+        out["qx_neq_discrete"][sl] = qx_neq_discrete
+        out["sig_neq_discrete"][sl] = sig_neq_discrete
         out["M400_raw"][sl] = M400_raw
+        out["M400_eq_discrete"][sl] = M400_eq_discrete
+        out["M400_neq"][sl] = M400_neq
+        out["M400_continuum_excess"][sl] = M400_continuum_excess
         out["M220_raw"][sl] = M220_raw
         out["M202_raw"][sl] = M202_raw
         out["M040_raw"][sl] = M040_raw
@@ -132,15 +149,20 @@ def higher_moments(f, v, v2, w, rho, ux, T, qx, sig, chunk=64):
 def save_npz(path, x_scaled, x_mfp, rho, ux, T, qx, sig, states, xhalf_mfp, extra):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
+    qx_corrected = extra.get("qx_neq_discrete", qx)
+    sig_corrected = extra.get("sig_neq_discrete", sig)
+
     data = {
         "x": x_scaled,
         "x_mfp": x_mfp,
         "rho": rho.detach().cpu().numpy(),
         "ux": ux.detach().cpu().numpy(),
         "T": T.detach().cpu().numpy(),
-        "qx": qx.detach().cpu().numpy(),
-        "sigma_xx": sig.detach().cpu().numpy(),
-        "sig": sig.detach().cpu().numpy(),
+        "qx": qx_corrected.detach().cpu().numpy(),
+        "qx_raw": qx.detach().cpu().numpy(),
+        "sigma_xx": sig_corrected.detach().cpu().numpy(),
+        "sig": sig_corrected.detach().cpu().numpy(),
+        "sig_raw": sig.detach().cpu().numpy(),
         "states": np.array([
             states["rho1"], states["u1"], states["T1"],
             states["rho2"], states["u2"], states["T2"]
@@ -190,11 +212,17 @@ def main():
     ap.add_argument("--nvy", type=int, default=18)
     ap.add_argument("--nvz", type=int, default=18)
     ap.add_argument("--vmax", type=float, default=12.0)
+    ap.add_argument("--grid-mode", choices=("uniform", "composite"), default="uniform")
+    ap.add_argument("--grid-gauss-order", type=int, default=3)
+    ap.add_argument("--grid-core-sigma", type=float, default=4.0)
+    ap.add_argument("--grid-tail-sigma", type=float, default=6.0)
+    ap.add_argument("--grid-interval-sigma", type=float, default=1.0)
     ap.add_argument("--steps", type=int, default=30000)
     ap.add_argument("--cfl", type=float, default=0.75)
     ap.add_argument("--center-every", type=int, default=50)
     ap.add_argument("--save-every", type=int, default=1500)
     ap.add_argument("--corr-iters", type=int, default=4)
+    ap.add_argument("--x-chunk", type=int, default=64)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--dtype", default="float32")
     args = ap.parse_args()
@@ -207,8 +235,26 @@ def main():
     states = normal_shock_states(args.M1, args.gamma, args.rho1, args.T1)
     print("[states]", states, flush=True)
 
-    v, v2, w = make_vgrid(args.nvx, args.nvy, args.nvz, args.vmax, device, dtype)
-    print(f"[vgrid] Nv={v.shape[0]} = {args.nvx}x{args.nvy}x{args.nvz}, vmax={args.vmax}", flush=True)
+    if args.grid_mode == "composite":
+        grid_spec = CompositeGridSpec(
+            gauss_order=args.grid_gauss_order,
+            core_sigma=args.grid_core_sigma,
+            tail_sigma=args.grid_tail_sigma,
+            interval_sigma=args.grid_interval_sigma,
+        )
+        axis_nodes, axis_weights = composite_velocity_quadrature(states, grid_spec)
+        grid_info = grid_metadata(axis_nodes, grid_spec)
+        v, v2, w = make_vgrid(
+            args.nvx, args.nvy, args.nvz, args.vmax, device, dtype,
+            axis_nodes=axis_nodes, axis_weights=axis_weights,
+        )
+    else:
+        grid_info = {
+            "mode": "uniform", "shape": [args.nvx, args.nvy, args.nvz],
+            "velocity_count": args.nvx * args.nvy * args.nvz, "vmax": args.vmax,
+        }
+        v, v2, w = make_vgrid(args.nvx, args.nvy, args.nvz, args.vmax, device, dtype)
+    print(f"[vgrid] {grid_info}", flush=True)
 
     ML = state_maxwellian(v, v2, w, states["rho1"], states["u1"], states["T1"])
     MR = state_maxwellian(v, v2, w, states["rho2"], states["u2"], states["T2"])
@@ -223,53 +269,39 @@ def main():
 
     x = torch.linspace(-args.xhalf_mfp, args.xhalf_mfp, args.nx, device=device, dtype=dtype)
     dx = float((x[1]-x[0]).detach().cpu())
-    dt = args.cfl*dx/args.vmax
-    print(f"[x] [-{args.xhalf_mfp},{args.xhalf_mfp}], nx={args.nx}, dx={dx:.4e}, dt={dt:.4e}", flush=True)
+    vmax_streamwise = float(torch.max(torch.abs(v[:, 0])).detach().cpu())
+    dt = args.cfl * dx / vmax_streamwise
+    print(f"[x] [-{args.xhalf_mfp},{args.xhalf_mfp}], nx={args.nx}, dx={dx:.4e}, vmax_x={vmax_streamwise:.4e}, dt={dt:.4e}", flush=True)
 
     H = 0.5*(1.0 + torch.tanh(x/3.0))
     rho0 = (1-H)*states["rho1"] + H*states["rho2"]
     ux0 = (1-H)*states["u1"] + H*states["u2"]
     T0 = (1-H)*states["T1"] + H*states["T2"]
 
-    f = conservative_discrete_maxwellian(v, v2, w, rho0, ux0, T0, niter=args.corr_iters)
+    f = conservative_discrete_maxwellian_chunked(
+        v, v2, w, rho0, ux0, T0, niter=args.corr_iters, x_chunk=args.x_chunk
+    )
 
-    pos = v[:, 0] > 0
-    neg = v[:, 0] < 0
     rho_mid = 0.5*(states["rho1"] + states["rho2"])
     last_rho = None
 
     running_out = str(Path(args.out).with_name(Path(args.out).stem + "_running.npz"))
 
     for step in range(1, args.steps+1):
-        f_left = torch.cat([ML[None, :], f[:-1]], dim=0)
-        f_right = torch.cat([f[1:], MR[None, :]], dim=0)
-
-        df_pos = (f - f_left)/dx
-        df_neg = (f_right - f)/dx
-        df = torch.where((v[:, 0] >= 0)[None, :], df_pos, df_neg)
-
-        fstar = f - dt*v[None, :, 0]*df
-        fstar[0, pos] = ML[pos]
-        fstar[-1, neg] = MR[neg]
-        fstar = torch.clamp(fstar, min=1.0e-30)
-
-        rho, ux, T, qx, sig = moments(fstar, v, v2, w)
-        Mloc = conservative_discrete_maxwellian(v, v2, w, rho, ux, T, niter=args.corr_iters)
-
-        # coordinate is scaled by upstream mean free path, so collision time is 1 in this DVM.
-        f = Mloc + (fstar - Mloc)*math.exp(-dt)
-        f = torch.clamp(f, min=1.0e-30)
-        f[0, pos] = ML[pos]
-        f[-1, neg] = MR[neg]
+        # Coordinate is scaled by upstream mean free path, so collision time is 1.
+        f = advance_bgk_chunked(
+            f, ML, MR, v, v2, w, dx, dt,
+            corr_iters=args.corr_iters, x_chunk=args.x_chunk,
+        )
 
         if step % args.center_every == 0:
-            rho, ux, T, qx, sig = moments(f, v, v2, w)
+            rho, ux, T, qx, sig = moments_chunked(f, v, v2, w, args.x_chunk)
             xs = find_crossing(x, rho, rho_mid)
             if abs(xs) > 1.0e-10:
                 f = recenter_f(f, x, xs, ML, MR)
 
         if step == 1 or step % args.save_every == 0 or step == args.steps:
-            rho, ux, T, qx, sig = moments(f, v, v2, w)
+            rho, ux, T, qx, sig = moments_chunked(f, v, v2, w, args.x_chunk)
             xs = find_crossing(x, rho, rho_mid)
 
             maxdrho = 0.0
@@ -291,10 +323,10 @@ def main():
             extra = higher_moments(f, v, v2, w, rho, ux, T, qx, sig)
             save_npz(running_out, x_scaled, x_mfp, rho, ux, T, qx, sig, states, args.xhalf_mfp, extra)
 
-    rho, ux, T, qx, sig = moments(f, v, v2, w)
+    rho, ux, T, qx, sig = moments_chunked(f, v, v2, w, args.x_chunk)
     xs = find_crossing(x, rho, rho_mid)
     f = recenter_f(f, x, xs, ML, MR)
-    rho, ux, T, qx, sig = moments(f, v, v2, w)
+    rho, ux, T, qx, sig = moments_chunked(f, v, v2, w, args.x_chunk)
 
     x_mfp = x.detach().cpu().numpy()
     x_scaled = x_mfp/(2.0*args.xhalf_mfp)
