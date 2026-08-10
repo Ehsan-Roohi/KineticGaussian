@@ -8,7 +8,7 @@ set -euo pipefail
 : "${SAVE_EVERY:?SAVE_EVERY is required}"
 : "${ALPHA:=40}"
 
-# MFC was built against Unity's OpenMPI 5.0.3.  Force the same module and
+# MFC was built against Unity's OpenMPI 5.0.3. Force the same module and
 # launcher used by the previously successful run; MFC's default launcher
 # preference selects srun inside a Slurm allocation, which fails during
 # MPI_Init on Unity for this build.
@@ -22,11 +22,33 @@ export OMP_NUM_THREADS=1
 python3 "$CASE_DIR/validate_mfc_2d_stl.py" \
     "$CASE_DIR/Diamond_Airfoil_2D_MFC.stl" --expected-edges 4
 
+# The MFC build/install tree is shared by all cases. A smoke job takes an
+# exclusive lock and performs the only clean build. Production jobs take a
+# shared lock and use that verified build read-only, so fine and very-fine
+# can run concurrently without racing in cmake_install.cmake.
+command -v flock >/dev/null || {
+    echo "Required command not found: flock" >&2
+    exit 4
+}
+LOCK_FILE="$MFC_ROOT/build/.unity-fixed-ib-build.lock"
+mkdir -p "$(dirname "$LOCK_FILE")"
+exec 9>"$LOCK_FILE"
+MFC_BUILD_ARGS=()
+if [[ "$GRID" == smoke ]]; then
+    echo "Waiting for exclusive MFC build lock: $LOCK_FILE"
+    flock -x 9
+    MFC_BUILD_ARGS=(--scratch)
+else
+    echo "Waiting for shared MFC run lock: $LOCK_FILE"
+    flock -s 9
+    MFC_BUILD_ARGS=(--no-build)
+fi
+
 LOG="$CASE_DIR/mfc-${GRID}.log"
 cd "$MFC_ROOT"
 set +e
 "$MFC_ROOT/mfc.sh" run "$CASE_DIR/case.py" \
-    -n "$SLURM_NTASKS" -b mpirun -- \
+    -n "$SLURM_NTASKS" -b mpirun "${MFC_BUILD_ARGS[@]}" -- \
     --alpha "$ALPHA" \
     --mode euler \
     --grid "$GRID" \
