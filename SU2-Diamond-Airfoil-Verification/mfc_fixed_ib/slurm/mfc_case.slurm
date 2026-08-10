@@ -8,6 +8,16 @@ set -euo pipefail
 : "${SAVE_EVERY:?SAVE_EVERY is required}"
 : "${ALPHA:=40}"
 
+# MFC was built against Unity's OpenMPI 5.0.3.  Force the same module and
+# launcher used by the previously successful run; MFC's default launcher
+# preference selects srun inside a Slurm allocation, which fails during
+# MPI_Init on Unity for this build.
+module purge
+module load openmpi/5.0.3
+MPI_LAUNCHER=$(command -v mpirun)
+echo "MPI_LAUNCHER=$MPI_LAUNCHER"
+"$MPI_LAUNCHER" --version
+
 export OMP_NUM_THREADS=1
 python3 "$CASE_DIR/validate_mfc_2d_stl.py" \
     "$CASE_DIR/Diamond_Airfoil_2D_MFC.stl" --expected-edges 4
@@ -15,7 +25,8 @@ python3 "$CASE_DIR/validate_mfc_2d_stl.py" \
 LOG="$CASE_DIR/mfc-${GRID}.log"
 cd "$MFC_ROOT"
 set +e
-"$MFC_ROOT/mfc.sh" run "$CASE_DIR/case.py" -n "$SLURM_NTASKS" -- \
+"$MFC_ROOT/mfc.sh" run "$CASE_DIR/case.py" \
+    -n "$SLURM_NTASKS" -b mpirun -- \
     --alpha "$ALPHA" \
     --mode euler \
     --grid "$GRID" \
