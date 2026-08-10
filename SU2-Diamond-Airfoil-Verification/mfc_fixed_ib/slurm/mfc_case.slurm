@@ -9,11 +9,11 @@ set -euo pipefail
 : "${ALPHA:=40}"
 
 export OMP_NUM_THREADS=1
-cd "$CASE_DIR"
-
-python3 validate_mfc_2d_stl.py Diamond_Airfoil_2D_MFC.stl --expected-edges 4
+python3 "$CASE_DIR/validate_mfc_2d_stl.py" \
+    "$CASE_DIR/Diamond_Airfoil_2D_MFC.stl" --expected-edges 4
 
 LOG="$CASE_DIR/mfc-${GRID}.log"
+cd "$MFC_ROOT"
 set +e
 "$MFC_ROOT/mfc.sh" run "$CASE_DIR/case.py" -n "$SLURM_NTASKS" -- \
     --alpha "$ALPHA" \
