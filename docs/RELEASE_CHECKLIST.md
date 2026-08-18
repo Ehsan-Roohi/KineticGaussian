@@ -6,14 +6,15 @@
 - [x] Lightweight DVM/manifest tests pass.
 - [x] Synthetic end-to-end smoke test is defined.
 - [x] Pull-request CI is defined.
-- [ ] CI passes in a clean CPU environment.
+- [x] CI passes in a clean CPU environment (GitHub Actions run 32128850259).
 - [ ] Exact Unity environment lock is exported and verified.
 
 ## Numerical evidence
 
 - [ ] High-Mach velocity and spatial convergence gates pass on final data.
 - [ ] A temporal convergence/residual criterion passes for every certified DVM case.
-- [ ] Full-Mach KGFR runs use training-only shared coordinate normalization.
+- [ ] Full-Mach KGFR results are rerun with training-only shared coordinate
+  normalization (the launcher now enforces it; archived results are pending).
 - [ ] Standard-MLP and matched-storage DVM baselines are complete and like-for-like.
 - [ ] Three-seed summaries include uncertainty and failure accounting.
 

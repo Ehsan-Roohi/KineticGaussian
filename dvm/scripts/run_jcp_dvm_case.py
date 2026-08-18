@@ -10,6 +10,29 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+
+
+def require_temporal_convergence(path: Path) -> None:
+    with np.load(path, allow_pickle=True) as data:
+        required = {
+            "temporal_gate_enabled",
+            "temporal_converged",
+            "temporal_history_json",
+        }
+        missing = required - set(data.files)
+        if missing:
+            raise SystemExit(f"Temporal metadata missing from {path}: {sorted(missing)}")
+        if not bool(np.asarray(data["temporal_gate_enabled"]).item()):
+            raise SystemExit(f"Temporal convergence gate was not enabled for {path}")
+        if not bool(np.asarray(data["temporal_converged"]).item()):
+            macro = float(np.asarray(data["temporal_latest_macro_relative_l2_max"]).item())
+            noneq = float(np.asarray(data["temporal_latest_noneq_relative_l2_max"]).item())
+            raise SystemExit(
+                f"Temporal convergence gate failed for {path}: "
+                f"latest macro={macro:.6e}, noneq={noneq:.6e}"
+            )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -56,11 +79,24 @@ def main() -> None:
         "--device", "cuda",
         "--dtype", os.environ.get("DVM_DTYPE", "float64"),
     ]
+    temporal = task.get("temporal_convergence")
+    if temporal is not None:
+        command.extend(
+            [
+                "--temporal-macro-tol", str(temporal["macro_relative_l2"]),
+                "--temporal-noneq-tol", str(temporal["noneq_relative_l2"]),
+                "--temporal-required-checks", str(temporal["required_consecutive_checks"]),
+                "--temporal-min-step-fraction", str(temporal["min_step_fraction"]),
+            ]
+        )
     print("[jcp-dvm task]", json.dumps(task, indent=2), flush=True)
     print("[jcp-dvm command]", " ".join(command), flush=True)
     subprocess.run(command, cwd=repo_root, check=True)
     if not final_path.exists() or final_path.stat().st_size == 0:
         raise SystemExit(f"Solver returned without final full state: {final_path}")
+    if temporal is not None:
+        require_temporal_convergence(Path(task["moments_path"]))
+        require_temporal_convergence(final_path)
     print(f"[jcp-dvm complete] {final_path}", flush=True)
 
 

@@ -36,9 +36,13 @@ class PrepareJcpDvmSuiteTest(unittest.TestCase):
             self.assertEqual(len(manifest["production"]), 3)
             self.assertEqual({row["case"] for row in manifest["convergence"]}, {"M6", "M12"})
             self.assertEqual({row["case"] for row in manifest["production"]}, {"M7", "M8", "M10"})
-            self.assertEqual(len({row["fullstate_path"] for row in manifest["convergence"] + manifest["production"]}), 9)
+            all_rows = manifest["convergence"] + manifest["production"]
+            self.assertEqual(len({row["fullstate_path"] for row in all_rows}), 9)
+            temporal = manifest["temporal_convergence"]
+            self.assertEqual(temporal["required_consecutive_checks"], 3)
+            for row in all_rows:
+                self.assertEqual(row["temporal_convergence"], temporal)
 
 
 if __name__ == "__main__":
     unittest.main()
-

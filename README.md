@@ -136,7 +136,9 @@ three seeds for:
 - blind M12 extrapolation trained only on M1.5 through M8.
 
 Mach normalization is computed from each run's training cases, so M12 does not
-influence its own training bounds. Submit the complete experiment with:
+influence its own training bounds. Coordinate normalization is also shared
+across a run and computed only from its training cases; the held-out domain
+therefore cannot set its own coordinate map. Submit the complete experiment with:
 
 ```bash
 bash scripts/unity_submit_full_mach.sh /project/pi_roohie_umass_edu/BGK_shock
@@ -226,6 +228,11 @@ The command performs the cheap quadrature audit synchronously, creates six
 convergence tasks (M6/M12 at coarse, medium, and fine levels), submits the
 convergence gate, and queues three production tasks (M7/M8/M10) behind that
 gate.  Production jobs remain in dependency state if convergence fails.
+Newly generated tasks also record profile changes at every saved state and
+require three consecutive late-time checks to pass the explicit macro and
+nonequilibrium tolerances in `dvm/configs/jcp_high_mach_cases.json`. The solver
+still runs its configured fixed number of steps; the diagnostic determines
+certification and never changes the trajectory by stopping early.
 
 Monitor the full dependency chain with:
 

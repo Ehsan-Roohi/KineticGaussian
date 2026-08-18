@@ -3,6 +3,12 @@
   "gamma": 1.6666666666666667,
   "rho1": 1.0,
   "T1": 1.0,
+  "temporal_convergence": {
+    "macro_relative_l2": 1e-6,
+    "noneq_relative_l2": 1e-4,
+    "required_consecutive_checks": 3,
+    "min_step_fraction": 0.5
+  },
   "levels": {
     "coarse": {
       "grid_gauss_order": 2,
@@ -36,4 +42,3 @@
   "convergence_cases": ["M6", "M12"],
   "production_cases": ["M7", "M8", "M10"]
 }
-

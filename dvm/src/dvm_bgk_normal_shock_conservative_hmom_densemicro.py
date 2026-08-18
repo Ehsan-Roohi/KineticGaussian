@@ -29,6 +29,7 @@ from dvm_velocity_grid import (
     composite_velocity_quadrature,
     grid_metadata,
 )
+from dvm_temporal_convergence import TemporalConvergenceTracker
 
 
 def higher_moments(f, v, v2, w, rho, ux, T, qx, sig, chunk=64):
@@ -147,7 +148,10 @@ def higher_moments(f, v, v2, w, rho, ux, T, qx, sig, chunk=64):
     return out
 
 
-def save_npz(path, x_scaled, x_mfp, rho, ux, T, qx, sig, states, xhalf_mfp, extra):
+def save_npz(
+    path, x_scaled, x_mfp, rho, ux, T, qx, sig, states, xhalf_mfp, extra,
+    metadata=None,
+):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     qx_corrected = extra.get("qx_neq_discrete", qx)
@@ -174,6 +178,9 @@ def save_npz(path, x_scaled, x_mfp, rho, ux, T, qx, sig, states, xhalf_mfp, extr
 
     for k, val in extra.items():
         data[k] = val.detach().cpu().numpy()
+
+    if metadata:
+        data.update(metadata)
 
     np.savez(path, **data)
     print(f"[saved] {path}", flush=True)
@@ -222,11 +229,24 @@ def main():
     ap.add_argument("--cfl", type=float, default=0.75)
     ap.add_argument("--center-every", type=int, default=50)
     ap.add_argument("--save-every", type=int, default=1500)
+    ap.add_argument("--temporal-macro-tol", type=float, default=0.0)
+    ap.add_argument("--temporal-noneq-tol", type=float, default=0.0)
+    ap.add_argument("--temporal-required-checks", type=int, default=0)
+    ap.add_argument("--temporal-min-step-fraction", type=float, default=0.5)
     ap.add_argument("--corr-iters", type=int, default=4)
     ap.add_argument("--x-chunk", type=int, default=64)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--dtype", default="float32")
     args = ap.parse_args()
+
+    if args.temporal_required_checks < 0:
+        ap.error("--temporal-required-checks must be nonnegative")
+    if not 0.0 <= args.temporal_min_step_fraction <= 1.0:
+        ap.error("--temporal-min-step-fraction must be between 0 and 1")
+    if args.temporal_required_checks > 0 and (
+        args.temporal_macro_tol <= 0.0 or args.temporal_noneq_tol <= 0.0
+    ):
+        ap.error("positive temporal tolerances are required when the temporal gate is enabled")
 
     device = torch.device("cuda" if args.device == "auto" and torch.cuda.is_available() else args.device)
     dtype = torch.float64 if args.dtype == "float64" else torch.float32
@@ -288,6 +308,12 @@ def main():
     last_rho = None
 
     running_out = str(Path(args.out).with_name(Path(args.out).stem + "_running.npz"))
+    temporal = TemporalConvergenceTracker(
+        macro_tolerance=args.temporal_macro_tol,
+        noneq_tolerance=args.temporal_noneq_tol,
+        required_consecutive_checks=args.temporal_required_checks,
+        min_step=int(np.ceil(args.temporal_min_step_fraction * args.steps)),
+    )
 
     for step in range(1, args.steps+1):
         # Coordinate is scaled by upstream mean free path, so collision time is 1.
@@ -323,7 +349,31 @@ def main():
             x_mfp = x.detach().cpu().numpy()
             x_scaled = x_mfp/(2.0*args.xhalf_mfp)
             extra = higher_moments(f, v, v2, w, rho, ux, T, qx, sig)
-            save_npz(running_out, x_scaled, x_mfp, rho, ux, T, qx, sig, states, args.xhalf_mfp, extra)
+            temporal_entry = temporal.update(
+                step,
+                {
+                    "rho": rho,
+                    "ux": ux,
+                    "T": T,
+                    "qx": extra["qx_neq_discrete"],
+                    "sig": extra["sig_neq_discrete"],
+                    "M300": extra["M300_neq"],
+                    "M400neq": extra["M400_neq"],
+                },
+            )
+            print(
+                "[temporal] "
+                f"eligible={temporal_entry['eligible']} "
+                f"macro={temporal_entry['macro_relative_l2_max']} "
+                f"noneq={temporal_entry['noneq_relative_l2_max']} "
+                f"streak={temporal_entry['consecutive_passes']}/"
+                f"{args.temporal_required_checks} converged={temporal.converged}",
+                flush=True,
+            )
+            save_npz(
+                running_out, x_scaled, x_mfp, rho, ux, T, qx, sig, states,
+                args.xhalf_mfp, extra, temporal.metadata(step),
+            )
 
     rho, ux, T, qx, sig = moments_chunked(f, v, v2, w, args.x_chunk)
     xs = find_crossing(x, rho, rho_mid)
@@ -384,6 +434,7 @@ def main():
             sig_raw=_np_cpu(sig),
             states=np.array([states], dtype=object),
             grid_metadata_json=np.array(json.dumps(grid_info)),
+            **temporal.metadata(args.steps),
             **(
                 {
                     "vx_nodes": axis_nodes[0], "vy_nodes": axis_nodes[1], "vz_nodes": axis_nodes[2],
@@ -396,7 +447,10 @@ def main():
     except Exception as e:
         print("[fullstate skipped]", repr(e), flush=True)
 
-    save_npz(args.out, x_scaled, x_mfp, rho, ux, T, qx, sig, states, args.xhalf_mfp, extra)
+    save_npz(
+        args.out, x_scaled, x_mfp, rho, ux, T, qx, sig, states,
+        args.xhalf_mfp, extra, temporal.metadata(args.steps),
+    )
     plot_basic(args.out, args.fig)
 
 

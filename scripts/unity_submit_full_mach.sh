@@ -35,7 +35,7 @@ mkdir -p data "$SUITE_DIR" logs/conditional
   --objectives moment \
   --conditionings all \
   --mach-bounds-source training \
-  --coordinate-normalization per_case \
+  --coordinate-normalization shared_training \
   --run-prefix fullmach \
   --skip-baselines \
   --steps 160000
@@ -81,6 +81,8 @@ for cfg in configs:
         raise SystemExit(f"Holdout leakage in {cfg['run_name']}")
     if cfg.get("mach_bounds_source") != "training":
         raise SystemExit(f"Non-blind Mach normalization in {cfg['run_name']}")
+    if cfg.get("data", {}).get("coordinate_normalization") != "shared_training":
+        raise SystemExit(f"Non-shared coordinate normalization in {cfg['run_name']}")
     if holdout == "M12":
         train_machs = [float(next(c["mach"] for c in cases if c["name"] == name)) for name in cfg["train_cases"]]
         if max(train_machs) > 8.0 or cfg["mach_bounds"] != [1.5, 8.0]:
@@ -94,7 +96,10 @@ for cfg in configs:
 expected_counts = {(holdout, degree): 3 for holdout in ("M3", "M6", "M12") for degree in (2, 3)}
 if counts != expected_counts:
     raise SystemExit(f"Unexpected full-Mach matrix: {counts}")
-print("[kinetic-gaussian] validated 18-run full-Mach matrix with blind M12 extrapolation")
+print(
+    "[kinetic-gaussian] validated 18-run full-Mach matrix with blind M12 "
+    "extrapolation and training-only shared coordinate normalization"
+)
 PY
 
 TASK_COUNT="$(awk 'NF{n++} END{print n+0}' "$TASK_FILE")"

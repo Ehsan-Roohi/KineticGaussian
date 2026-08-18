@@ -47,12 +47,14 @@ A completed Slurm job is not automatically a numerically certified result.
 
 - The minimum dependency versions in `pyproject.toml` are install metadata, not
   an exact lock of the Unity environment.
-- The high-Mach JCP workflow checks velocity/spatial medium-to-fine agreement,
-  but a strict temporal residual gate is still required before paper release.
-- The exploratory full-Mach launcher currently uses per-case coordinate
-  normalization and skips matched-storage baselines. A publication-grade
-  rerun should use training-only shared normalization and include a like-for-like
-  baseline.
+- New JCP task manifests enable a fixed-step temporal residual gate for macro
+  and nonequilibrium profiles. Its initial thresholds are explicit in
+  `dvm/configs/jcp_high_mach_cases.json`; they still require confirmation on
+  completed M6/M12 histories before any paper claim. Legacy task manifests run
+  unchanged and therefore do not gain temporal certification retroactively.
+- The full-Mach launcher now enforces coordinate normalization computed only
+  from the training cases. Existing per-case-normalized results must be rerun,
+  and matched-storage baselines are still pending.
 - Public archival copies of the scientific manifests, final checkpoints,
   metrics, and permitted data are still pending.
 

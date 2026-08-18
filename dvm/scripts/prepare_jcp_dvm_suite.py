@@ -8,11 +8,18 @@ import json
 from pathlib import Path
 
 
-def task(case_name: str, case: dict, level_name: str, level: dict, output_root: Path) -> dict:
+def task(
+    case_name: str,
+    case: dict,
+    level_name: str,
+    level: dict,
+    output_root: Path,
+    temporal_convergence: dict | None = None,
+) -> dict:
     nx = int(round(case["nx"] * level["spatial_factor"]))
     run_name = f"{case_name}_{level_name}_gl{level['grid_gauss_order']}_nx{nx}"
     outdir = output_root / case_name / level_name
-    return {
+    row = {
         "case": case_name,
         "mach": case["mach"],
         "level": level_name,
@@ -30,6 +37,9 @@ def task(case_name: str, case: dict, level_name: str, level: dict, output_root: 
         "fullstate_path": str(outdir / f"standing_{run_name}_fullstate.npz"),
         "figure_path": str(outdir / f"standing_{run_name}.png"),
     }
+    if temporal_convergence is not None:
+        row["temporal_convergence"] = dict(temporal_convergence)
+    return row
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -50,12 +60,43 @@ def main() -> None:
     data_root = Path(args.data_root).resolve()
     levels = config["levels"]
     cases = config["cases"]
+    temporal_convergence = config.get("temporal_convergence")
+    if temporal_convergence is not None:
+        required = {
+            "macro_relative_l2",
+            "noneq_relative_l2",
+            "required_consecutive_checks",
+            "min_step_fraction",
+        }
+        missing = required - set(temporal_convergence)
+        if missing:
+            raise ValueError(f"Temporal convergence config missing {sorted(missing)}")
+        if float(temporal_convergence["macro_relative_l2"]) <= 0.0:
+            raise ValueError("macro_relative_l2 must be positive")
+        if float(temporal_convergence["noneq_relative_l2"]) <= 0.0:
+            raise ValueError("noneq_relative_l2 must be positive")
+        if int(temporal_convergence["required_consecutive_checks"]) < 1:
+            raise ValueError("required_consecutive_checks must be at least one")
+        min_fraction = float(temporal_convergence["min_step_fraction"])
+        if not 0.0 <= min_fraction <= 1.0:
+            raise ValueError("min_step_fraction must be between zero and one")
 
     convergence = []
     for name in config["convergence_cases"]:
         for level_name in ("coarse", "medium", "fine"):
-            convergence.append(task(name, cases[name], level_name, levels[level_name], data_root))
-    production = [task(name, cases[name], "medium", levels["medium"], data_root) for name in config["production_cases"]]
+            convergence.append(
+                task(
+                    name, cases[name], level_name, levels[level_name], data_root,
+                    temporal_convergence,
+                )
+            )
+    production = [
+        task(
+            name, cases[name], "medium", levels["medium"], data_root,
+            temporal_convergence,
+        )
+        for name in config["production_cases"]
+    ]
 
     groups = {
         "convergence_mid.jsonl": [row for row in convergence if row["gpu_class"] == "mid"],
@@ -69,6 +110,7 @@ def main() -> None:
     manifest = {
         "config": str(Path(args.config).resolve()),
         "data_root": str(data_root),
+        "temporal_convergence": temporal_convergence,
         "convergence": convergence,
         "production": production,
     }
@@ -81,4 +123,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
