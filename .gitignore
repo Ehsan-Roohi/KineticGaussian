@@ -1,7 +1,14 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
+build/
+dist/
+*.egg-info/
+.coverage
+htmlcov/
 data/*.npz
 data/*manifest.json
 !data/manifest.example.json

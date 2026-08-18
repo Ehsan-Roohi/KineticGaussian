@@ -2,7 +2,37 @@
 
 Positive, compact Gaussian representations of rarefied shock distributions, with a strict leave-one-Mach-out experiment for flow-level generalization.
 
+> **Development status:** pre-release research software. The lightweight tests
+> and synthetic smoke workflow are reproducible from a clean clone. Large Unity
+> results are not yet an archival paper release; use the evidence labels and
+> release gates in [the reproducibility guide](docs/REPRODUCIBILITY.md).
+
 This repository contains the original single-shock KGFR implementation and a flow-level generalization experiment. The new model conditions every Gaussian kernel on Mach number through a low-order Legendre expansion. It is trained on complete DVM distributions at selected Mach numbers and evaluated on a shock whose distribution was never used during training.
+
+## Install and validate
+
+Python 3.10 or newer is required. A clean local validation uses only synthetic
+data:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+bash run_quick_smoke.sh
+```
+
+The smoke output is a software check, not a scientific result.
+
+## Repository map
+
+- `kgfr/`: reusable Gaussian-representation models, data loading, moments, and plotting;
+- `configs/`: hand-written single-case examples;
+- `scripts/` and `slurm/`: generalization experiment generation and Unity launchers;
+- `baselines/`: matched-storage DVM baseline;
+- `dvm/`: reference solvers and the high-Mach certification campaign;
+- `tests/`: unit and synthetic end-to-end tests;
+- `docs/`: reproducibility rules and the scientific release checklist.
 
 ## Main generalization question
 
@@ -122,9 +152,7 @@ python scripts/summarize_full_mach.py
 ## Local validation
 
 ```bash
-python -m unittest tests/test_conditional_model.py
-python -m unittest tests/test_prepare_generalization_suite.py tests/test_make_full_mach_manifest.py
-python tests/smoke_end_to_end.py
+bash run_quick_smoke.sh
 ```
 
 The end-to-end smoke test creates three small synthetic DVM files, trains for three steps on two Mach cases, evaluates the third case, and verifies the metrics artifact.
@@ -163,6 +191,10 @@ Expected NPZ keys are `x`, `f`, `v`, `w`, `rho`, `ux`, `T`, `qx`, and `sig` or `
 ## Reproducibility note
 
 The repository intentionally excludes DVM arrays, checkpoints, and generated configs. The Unity launcher records absolute source paths and every hyperparameter in each generated config. Do not interpret the synthetic smoke-test errors as scientific results; only completed Unity DVM runs belong in the paper.
+
+Completion alone is not numerical certification. Before publication, follow
+the convergence, baseline, environment, and archival gates in
+[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
 
 ## JCP high-Mach DVM certification campaign
 

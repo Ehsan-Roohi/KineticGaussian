@@ -1,5 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-python -m kgfr.inspect_npz --path data/pack_M3_M5/M3_DVM_hmom.npz
-python train_moment_gaussian_1d.py --config configs/M3_moment1d.json
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BIN="${KGFR_PYTHON:-python}"
+MPLCONFIGDIR="${MPLCONFIGDIR:-${TMPDIR:-/tmp}/kinetic-gaussian-matplotlib}"
+
+export MPLCONFIGDIR
+mkdir -p "$MPLCONFIGDIR"
+
+cd "$REPO_ROOT"
+"$PYTHON_BIN" -m unittest discover -v
+"$PYTHON_BIN" tests/smoke_end_to_end.py

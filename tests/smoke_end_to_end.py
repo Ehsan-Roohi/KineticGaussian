@@ -70,7 +70,10 @@ def main() -> None:
             },
             "sampling": {"x_batch": 2, "vel_per_x": 12, "uniform_vel_frac": 0.2, "mass_alpha": 0.7},
             "train": {"steps": 3, "lr": 0.001, "warmup_steps": 1, "log_every": 1, "save_every": 3, "lambda_moment": 0.0},
-            "evaluation": {"moment_keys": ["rho", "ux", "T", "qx", "sig", "M400", "M400neq"]},
+            # qx and sig are exactly zero for these synthetic Maxwellians, so a
+            # relative error is undefined. Non-equilibrium moment behavior is
+            # covered by M400neq without emitting meaningless 1e300 metrics.
+            "evaluation": {"moment_keys": ["rho", "ux", "T", "M400", "M400neq"]},
         }
         config_path = root / "config.json"
         config_path.write_text(json.dumps(config), encoding="utf-8")
