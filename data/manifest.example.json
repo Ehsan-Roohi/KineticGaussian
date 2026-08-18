@@ -1,0 +1,24 @@
+{
+  "description": "Example leave-one-Mach-out dataset manifest",
+  "mach_bounds": [2.5, 5.0],
+  "cases": [
+    {
+      "name": "M2p5",
+      "mach": 2.5,
+      "data_path": "/path/to/standing_M2p5_fullstate.npz",
+      "moment_path": null
+    },
+    {
+      "name": "M3",
+      "mach": 3.0,
+      "data_path": "/path/to/standing_M3_fullstate.npz",
+      "moment_path": "/path/to/M3_DVM_hmom.npz"
+    },
+    {
+      "name": "M5",
+      "mach": 5.0,
+      "data_path": "/path/to/standing_M5_fullstate.npz",
+      "moment_path": "/path/to/M5_DVM_hmom.npz"
+    }
+  ]
+}

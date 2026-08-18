@@ -2,7 +2,37 @@
 
 Positive, compact Gaussian representations of rarefied shock distributions, with a strict leave-one-Mach-out experiment for flow-level generalization.
 
+> **Development status:** pre-release research software. The lightweight tests
+> and synthetic smoke workflow are reproducible from a clean clone. Large Unity
+> results are not yet an archival paper release; use the evidence labels and
+> release gates in [the reproducibility guide](docs/REPRODUCIBILITY.md).
+
 This repository contains the original single-shock KGFR implementation and a flow-level generalization experiment. The new model conditions every Gaussian kernel on Mach number through a low-order Legendre expansion. It is trained on complete DVM distributions at selected Mach numbers and evaluated on a shock whose distribution was never used during training.
+
+## Install and validate
+
+Python 3.10 or newer is required. A clean local validation uses only synthetic
+data:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+bash run_quick_smoke.sh
+```
+
+The smoke output is a software check, not a scientific result.
+
+## Repository map
+
+- `kgfr/`: reusable Gaussian-representation models, data loading, moments, and plotting;
+- `configs/`: hand-written single-case examples;
+- `scripts/` and `slurm/`: generalization experiment generation and Unity launchers;
+- `baselines/`: matched-storage DVM baseline;
+- `dvm/`: reference solvers and the high-Mach certification campaign;
+- `tests/`: unit and synthetic end-to-end tests;
+- `docs/`: reproducibility rules and the scientific release checklist.
 
 ## Main generalization question
 
@@ -37,7 +67,7 @@ After cloning this repository on Unity, run:
 bash scripts/unity_submit.sh /project/pi_roohie_umass_edu/BGK_shock
 ```
 
-The script discovers the existing M2.5, M3, and M5 full-state files, validates their required arrays, writes a manifest, generates 18 GPU configs, submits the GPU array with at most four simultaneous jobs, and submits three matched-storage CPU baselines. It uses the existing Unity Python environment at:
+The script discovers the existing M2.5, M3, and M5 full-state files, validates their required arrays, writes a manifest, and submits a small preflight smoke job. Only after that job succeeds does Slurm release the 18-run GPU array and three matched-storage CPU baselines. At most four GPU jobs run simultaneously. The launcher uses the existing Unity Python environment at:
 
 ```text
 /work/pi_roohie_umass_edu/roohie_umass_edu/.conda/envs/dde-tf/bin/python
@@ -45,11 +75,86 @@ The script discovers the existing M2.5, M3, and M5 full-state files, validates t
 
 Override it when needed with `KGFR_PYTHON=/path/to/python`.
 
+## Diagnostic evaluation of existing checkpoints
+
+Evaluate every completed v1 checkpoint on the two training cases and the held-out M3 case without overwriting the original held-out outputs:
+
+```bash
+bash scripts/unity_submit_endpoint_eval.sh
+```
+
+Results are written under `eval_all_cases/`. Comparing training-case and held-out errors distinguishes representation underfitting from failure to interpolate in Mach number.
+
+## Version 2 held-out-Mach suite
+
+Version 2 fixes one Gaussian geometry across Mach number and conditions only the positive kernel amplitudes. It also uses one coordinate normalization computed exclusively from the M2.5 and M5 training domains. This prevents kernel identities from crossing or permuting with Mach and avoids case-specific coordinate maps. Submit the nine-run `N=128,256,512`, three-seed, moment-aware suite with:
+
+```bash
+bash scripts/unity_submit_v2.sh /project/pi_roohie_umass_edu/BGK_shock
+```
+
+Evaluation now reports the nonequilibrium fourth-order diagnostic `M400neq = M400 - 3 rho T^2` when a raw fourth-moment reference is available. The original v1 launcher and checkpoint format remain supported.
+
+## Conditioning/normalization ablation
+
+The v1-to-v2 change altered both Mach conditioning and coordinate normalization. The
+six-run diagnostic suite fills the two missing cells without overwriting either suite:
+
+- all kernel parameters conditioned on Mach with shared training-only normalization,
+  using `N=256` (5,120 parameters);
+- amplitude-only conditioning with per-case normalization, using `N=512` (5,632
+  parameters).
+
+Each cell uses seeds `1234`, `2026`, and `3407` with the moment-aware objective. A
+smoke test gates training, and all-case evaluation on M2.5/M3/M5 is submitted
+automatically after every training task succeeds:
+
+```bash
+bash scripts/unity_submit_ablation.sh /project/pi_roohie_umass_edu/BGK_shock
+```
+
+After the dependent evaluation array completes, compare all four cells with:
+
+```bash
+python scripts/summarize_ablation.py
+```
+
+## Full Mach sweep and blind Mach-12 extrapolation
+
+The Unity archive contains authoritative full-distribution DVM shocks at
+`M=1.5, 2, 2.5, 3, 4, 5, 6, 8, 12`. The imported `dvm/` directory preserves
+the original high-moment solver and Slurm launchers; the multi-gigabyte NPZ
+arrays remain on Unity and are intentionally excluded from Git.
+
+The full-Mach launcher rejects `lite`, smoke, running, incomplete, and known-bad
+archives, checks the required `f,v,w` arrays and high-moment companions, and
+submits 18 moment-aware runs. It compares degree-2 and degree-3 Mach laws over
+three seeds for:
+
+- M3 interpolation;
+- M6 interpolation;
+- blind M12 extrapolation trained only on M1.5 through M8.
+
+Mach normalization is computed from each run's training cases, so M12 does not
+influence its own training bounds. Coordinate normalization is also shared
+across a run and computed only from its training cases; the held-out domain
+therefore cannot set its own coordinate map. Submit the complete experiment with:
+
+```bash
+bash scripts/unity_submit_full_mach.sh /project/pi_roohie_umass_edu/BGK_shock
+```
+
+The launcher prints the smoke, training-array, and evaluation-array job IDs.
+After all dependent jobs complete, summarize the held-out results with:
+
+```bash
+python scripts/summarize_full_mach.py
+```
+
 ## Local validation
 
 ```bash
-python -m unittest tests/test_conditional_model.py
-python tests/smoke_end_to_end.py
+bash run_quick_smoke.sh
 ```
 
 The end-to-end smoke test creates three small synthetic DVM files, trains for three steps on two Mach cases, evaluates the third case, and verifies the metrics artifact.
@@ -88,3 +193,58 @@ Expected NPZ keys are `x`, `f`, `v`, `w`, `rho`, `ux`, `T`, `qx`, and `sig` or `
 ## Reproducibility note
 
 The repository intentionally excludes DVM arrays, checkpoints, and generated configs. The Unity launcher records absolute source paths and every hyperparameter in each generated config. Do not interpret the synthetic smoke-test errors as scientific results; only completed Unity DVM runs belong in the paper.
+
+Completion alone is not numerical certification. Before publication, follow
+the convergence, baseline, environment, and archival gates in
+[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
+
+## JCP high-Mach DVM certification campaign
+
+The legacy high-Mach references used a uniform velocity cube.  At M12 its
+transverse spacing was too coarse to make the nominal far-field Maxwellian
+stress and fourth-order nonequilibrium moment vanish.  The JCP campaign fixes
+this before any new KGFR training:
+
+- a CPU audit evaluates upstream and downstream Rankine--Hugoniot Maxwellians;
+- a composite Gauss--Legendre velocity grid resolves both the narrow upstream
+  and hot downstream states without an unaffordable uniform cube;
+- nonequilibrium `qx`, `sig`, `M300`, and `M400` are saved from `f-Md`, where
+  `Md` is the local conservative discrete Maxwellian;
+- combined spatial/velocity convergence is run at M6 and M12;
+- a strict medium-to-fine gate must pass before production M7, M8, and M10
+  jobs are released;
+- M6/M7/M8 use FP64 GPUs with at least 48 GB VRAM, while M10/M12 use FP64
+  GPUs with at least 80 GB VRAM.
+
+The complete campaign is self-contained in this repository.  Large NPZ files
+remain under the supplied BGK data root and are never committed.  Submit from
+the `KineticGaussian` checkout on Unity:
+
+```bash
+bash dvm/scripts/unity_submit_jcp_dvm.sh /project/pi_roohie_umass_edu/BGK_shock
+```
+
+The command performs the cheap quadrature audit synchronously, creates six
+convergence tasks (M6/M12 at coarse, medium, and fine levels), submits the
+convergence gate, and queues three production tasks (M7/M8/M10) behind that
+gate.  Production jobs remain in dependency state if convergence fails.
+Newly generated tasks also record profile changes at every saved state and
+require three consecutive late-time checks to pass the explicit macro and
+nonequilibrium tolerances in `dvm/configs/jcp_high_mach_cases.json`. The solver
+still runs its configured fixed number of steps; the diagnostic determines
+certification and never changes the trajectory by stopping early.
+
+Monitor the full dependency chain with:
+
+```bash
+bash dvm/scripts/unity_status_jcp_dvm.sh
+```
+
+Certified outputs are written to:
+
+```text
+/project/pi_roohie_umass_edu/BGK_shock/ref/jcp_velocity_certified/
+```
+
+The manifest discovery script recognizes M7 and M10 and preferentially uses
+the certified medium grid after the convergence gate has passed.

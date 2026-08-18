@@ -1,0 +1,44 @@
+{
+  "run_name": "M3_phase_xvx_N256_moment",
+  "data_path": "data/pack_M3_M5/standing_M3_hmom_x60_nx1800_v121_23_23_vmax16_fullstate.npz",
+  "moment_path": "data/pack_M3_M5/M3_DVM_hmom.npz",
+  "output_dir": "runs",
+  "device": "cuda",
+  "seed": 2234,
+  "model": {
+    "variant": "xvx",
+    "num_kernels": 256,
+    "log_scale_min": -7.5,
+    "log_scale_max": 0.8,
+    "init_log_scale": -1.2,
+    "init_log_amp": -8.0,
+    "init_samples": 200000
+  },
+  "sampling": {
+    "x_batch": 32,
+    "vel_per_x": 256,
+    "uniform_vel_frac": 0.20,
+    "mass_alpha": 0.70,
+    "f_floor": 1.0e-35
+  },
+  "train": {
+    "steps": 25000,
+    "lr": 8.0e-4,
+    "center_lr_mult": 0.25,
+    "scale_lr_mult": 0.50,
+    "amp_lr_mult": 1.00,
+    "corr_lr_mult": 0.30,
+    "weight_decay": 1.0e-8,
+    "grad_clip": 1.0,
+    "log_every": 25,
+    "save_every": 1000,
+    "eval_every": 1000,
+    "logf_loss": "mse",
+    "logf_error_clip": 30.0,
+    "lambda_moment": 0.10,
+    "moment_every": 5,
+    "moment_x_count": 8,
+    "moment_v_chunk": 8192,
+    "moment_keys": ["rho", "ux", "T", "qx", "sig"]
+  }
+}

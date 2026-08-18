@@ -1,0 +1,44 @@
+{
+  "description": "JCP velocity-certified normal-shock DVM campaign",
+  "gamma": 1.6666666666666667,
+  "rho1": 1.0,
+  "T1": 1.0,
+  "temporal_convergence": {
+    "macro_relative_l2": 1e-6,
+    "noneq_relative_l2": 1e-4,
+    "required_consecutive_checks": 3,
+    "min_step_fraction": 0.5
+  },
+  "levels": {
+    "coarse": {
+      "grid_gauss_order": 2,
+      "grid_core_sigma": 3.0,
+      "grid_tail_sigma": 6.0,
+      "grid_interval_sigma": 1.0,
+      "spatial_factor": 0.8
+    },
+    "medium": {
+      "grid_gauss_order": 3,
+      "grid_core_sigma": 4.0,
+      "grid_tail_sigma": 6.0,
+      "grid_interval_sigma": 1.0,
+      "spatial_factor": 1.0
+    },
+    "fine": {
+      "grid_gauss_order": 3,
+      "grid_core_sigma": 5.0,
+      "grid_tail_sigma": 7.0,
+      "grid_interval_sigma": 1.0,
+      "spatial_factor": 1.2
+    }
+  },
+  "cases": {
+    "M6": {"mach": 6.0, "xhalf": 95.0, "nx": 2400, "steps": 120000, "gpu_class": "mid"},
+    "M7": {"mach": 7.0, "xhalf": 108.0, "nx": 2600, "steps": 140000, "gpu_class": "mid"},
+    "M8": {"mach": 8.0, "xhalf": 120.0, "nx": 2800, "steps": 160000, "gpu_class": "mid"},
+    "M10": {"mach": 10.0, "xhalf": 180.0, "nx": 3500, "steps": 200000, "gpu_class": "high"},
+    "M12": {"mach": 12.0, "xhalf": 240.0, "nx": 4200, "steps": 240000, "gpu_class": "high"}
+  },
+  "convergence_cases": ["M6", "M12"],
+  "production_cases": ["M7", "M8", "M10"]
+}
